@@ -1,0 +1,49 @@
+import React, { useEffect, useState } from 'react';
+import PinLockModal from './PinLockModal';
+import SetPinModal from './SetPinModal';
+import { supabase } from '../src/utils/supabaseClient';
+
+export default function PinLockGate({ children }: { children: React.ReactNode }) {
+  const [userId, setUserId] = useState<string | null>(null);
+  const [pinHash, setPinHash] = useState<string | null>(null);
+  const [showSetPin, setShowSetPin] = useState(false);
+  const [showPinLock, setShowPinLock] = useState(false);
+  const [unlocked, setUnlocked] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+      setUserId(user.id);
+      // Fetch pin_hash
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('pin_hash')
+        .eq('id', user.id)
+        .single();
+      if (!error && data && data.pin_hash) {
+        setPinHash(data.pin_hash);
+        setShowPinLock(true);
+      } else {
+        setShowSetPin(true);
+      }
+      setLoading(false);
+    };
+    fetchUser();
+  }, []);
+
+  if (loading) return null;
+  if (!userId) return <>{children}</>; // Not logged in
+
+  return (
+    <>
+      <SetPinModal open={showSetPin} onSet={() => { setShowSetPin(false); setShowPinLock(true); }} userId={userId} />
+      <PinLockModal open={showPinLock && !unlocked} onUnlock={() => { setUnlocked(true); setShowPinLock(false); }} userId={userId} />
+      {unlocked || (!pinHash && !showSetPin) ? children : null}
+    </>
+  );
+}
