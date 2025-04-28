@@ -1,14 +1,16 @@
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
-import { Box, Typography, Avatar, TextField, IconButton, List, ListItem, ListItemAvatar, ListItemText, Paper, CircularProgress, Dialog, Button, Menu, MenuItem, Input } from '@mui/material';
+import { Box, Typography, Avatar, TextField, IconButton, List, ListItem, ListItemAvatar, ListItemText, Paper, CircularProgress, Dialog, Button, Menu, MenuItem, Input, LinearProgress } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import PersonIcon from '@mui/icons-material/Person';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
+import CustomAudioPlayer from './CustomAudioPlayer';
+import RecordingFloatingBar from './RecordingFloatingBar';
 import MicIcon from '@mui/icons-material/Mic';
 import StopIcon from '@mui/icons-material/Stop';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { supabase } from '../../src/utils/supabaseClient';
 import { useRouter } from 'next/router';
-import { FileMessageBubble } from './FileMessageBubble';
+
 
 interface Message {
   id: string;
@@ -42,6 +44,18 @@ function getInitials(name?: string) {
 
 
 export default function ChatWindow({ chatId, currentUserId, currentUserAvatarUrl, currentUserDisplayName, otherUser, deleteChat }: ChatWindowProps) {
+  // Image/file preview modal state
+  const [imagePreview, setImagePreview] = useState<{ url: string; name: string } | null>(null);
+  // Download handler for any file (image or other)
+  const handleDownload = (url: string, name: string) => {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name || '';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Scroll to and highlight a message by id
   const scrollToMessage = (messageId: string) => {
     const listElem = listRef.current;
@@ -106,45 +120,92 @@ export default function ChatWindow({ chatId, currentUserId, currentUserAvatarUrl
   const audioChunksRef = useRef<Blob[]>([]);
   const [recordingTime, setRecordingTime] = useState(0); // seconds
   const [recordingInterval, setRecordingInterval] = useState<NodeJS.Timeout | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
+  const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
   const [audioPreview, setAudioPreview] = useState<string | null>(null); // URL of recorded blob
+  const [audioPreviewDuration, setAudioPreviewDuration] = useState<number | null>(null); // duration in seconds
   const [isUploadingAudio, setIsUploadingAudio] = useState(false);
 
-  // File upload handler
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    // Optionally limit file size/type here
-    const fileExt = file.name.split('.').pop();
-    const fileName = `file_${Date.now()}_${currentUserId}.${fileExt}`;
-    const { data, error } = await supabase.storage
-      .from('chat-files')
-      .upload(fileName, file, { contentType: file.type });
-    if (!error) {
-      const { publicUrl } = supabase.storage.from('chat-files').getPublicUrl(fileName).data;
-      await supabase.from('messages').insert({
-        chat_id: chatId,
-        sender_id: currentUserId,
-        content: '',
-        file_url: publicUrl,
-        file_name: file.name,
-        file_type: file.type,
-        file_size: file.size,
-        type: 'file'
-      });
-    } else {
-      alert('File upload failed! ' + (error?.message || ''));
-    }
-    // Reset the file input value so the same file can be uploaded again if needed
-    e.target.value = '';
-  };
+  // File upload handler with preview
+const [uploadProgress, setUploadProgress] = useState(0);
+const [pendingFile, setPendingFile] = useState<{
+  fileUrl: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  storagePath: string;
+} | null>(null);
+
+const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  setUploadProgress(0);
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const fileExt = file.name.split('.').pop();
+  const fileName = `file_${Date.now()}_${currentUserId}.${fileExt}`;
+
+  // Simulate upload progress
+  setUploadProgress(0);
+  let progress = 0;
+  const progressInterval = setInterval(() => {
+    progress += Math.random() * 15;
+    setUploadProgress(Math.min(progress, 95));
+  }, 180);
+
+  const { data, error } = await supabase.storage
+    .from('chat-files')
+    .upload(fileName, file, { contentType: file.type });
+
+  clearInterval(progressInterval);
+  setUploadProgress(100);
+
+  if (!error) {
+    const { publicUrl } = supabase.storage.from('chat-files').getPublicUrl(fileName).data;
+    setPendingFile({
+      fileUrl: publicUrl,
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size,
+      storagePath: fileName
+    });
+  } else {
+    alert('File upload failed! ' + (error?.message || ''));
+    setUploadProgress(0);
+  }
+  e.target.value = '';
+};
+
+const handleSendFile = async () => {
+  if (!pendingFile) return;
+  await supabase.from('messages').insert({
+    chat_id: chatId,
+    sender_id: currentUserId,
+    content: '',
+    file_url: pendingFile.fileUrl,
+    file_name: pendingFile.fileName,
+    file_type: pendingFile.fileType,
+    file_size: pendingFile.fileSize,
+    type: 'file'
+  });
+  setPendingFile(null);
+};
+
+const handleCancelFile = async () => {
+  if (pendingFile) {
+    // Optionally delete the file from storage
+    await supabase.storage.from('chat-files').remove([pendingFile.storagePath]);
+    setPendingFile(null);
+  }
+};
 
   const handleStartRecording = async () => {
     if (!navigator.mediaDevices) return alert("Audio recording not supported!");
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const recorder = new MediaRecorder(stream);
     setMediaRecorder(recorder);
+    setAudioStream(stream);
     audioChunksRef.current = [];
     setRecordingTime(0);
+    setIsPaused(false);
     recorder.start();
     setRecording(true);
     // Start timer
@@ -163,6 +224,11 @@ export default function ChatWindow({ chatId, currentUserId, currentUserAvatarUrl
       setRecording(false);
       if (recordingInterval) clearInterval(recordingInterval);
       setRecordingInterval(null);
+      setIsPaused(false);
+      if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+        setAudioStream(null);
+      }
       const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
       const url = URL.createObjectURL(audioBlob);
       setAudioPreview(url);
@@ -170,8 +236,20 @@ export default function ChatWindow({ chatId, currentUserId, currentUserAvatarUrl
   };
 
   const handlePauseRecording = () => {
-    if (mediaRecorder && recording) {
-      mediaRecorder.stop();
+    if (mediaRecorder && recording && !isPaused) {
+      // Pause recording
+      if (mediaRecorder.state === 'recording') mediaRecorder.pause();
+      setIsPaused(true);
+      if (recordingInterval) clearInterval(recordingInterval);
+      setRecordingInterval(null);
+    } else if (mediaRecorder && recording && isPaused) {
+      // Resume recording
+      if (mediaRecorder.state === 'paused') mediaRecorder.resume();
+      setIsPaused(false);
+      const interval = setInterval(() => {
+        setRecordingTime((prev) => prev + 1);
+      }, 1000);
+      setRecordingInterval(interval);
     }
   };
 
@@ -179,6 +257,10 @@ export default function ChatWindow({ chatId, currentUserId, currentUserAvatarUrl
     setAudioPreview(null);
     audioChunksRef.current = [];
     setRecordingTime(0);
+    if (audioStream) {
+      audioStream.getTracks().forEach(track => track.stop());
+      setAudioStream(null);
+    }
   };
 
   const handleSendAudio = async () => {
@@ -479,13 +561,34 @@ export default function ChatWindow({ chatId, currentUserId, currentUserAvatarUrl
                     },
                   }}>
                     {msg.type === 'file' && msg.file_url ? (
-                      <FileMessageBubble
-                        fileUrl={msg.file_url}
-                        fileName={msg.file_name || ''}
-                        fileType={msg.file_type || ''}
-                        fileSize={msg.file_size || 0}
-                        isMine={isMine}
-                      />
+                      msg.file_type && msg.file_type.startsWith('image/') ? (
+                        <img
+                          src={msg.file_url}
+                          alt={msg.file_name || 'image'}
+                          style={{
+                            maxWidth: 220,
+                            maxHeight: 180,
+                            borderRadius: 8,
+                            boxShadow: '0 2px 8px #0006',
+                            objectFit: 'cover',
+                            background: '#222',
+                            cursor: 'pointer',
+                            margin: 2
+                          }}
+                          onClick={() => setImagePreview({ url: msg.file_url ?? '', name: msg.file_name || '' })}
+                        />
+                      ) : (
+                        <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: isMine ? 'flex-end' : 'flex-start', px: 0, py: 0, borderRadius: 2, boxShadow: 'none', bgcolor: 'transparent', width: '100%' }}>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: isMine ? 'flex-end' : 'flex-start', justifyContent: 'center', bgcolor: '#23262b', px: 2, py: 1, borderRadius: 4, boxShadow: 'none', minWidth: 120 }}>
+                            <Typography sx={{ fontSize: 16, fontWeight: 600, color: '#fff', fontFamily: 'Inter, Segoe UI, system-ui, Arial, sans-serif', textShadow: '0 2px 8px #0005', mb: 0.3 }}>{msg.file_name || ''}</Typography>
+                            <Typography sx={{ fontSize: 13, color: '#b0b3ba', mt: 0.2, fontFamily: 'Inter, Segoe UI, system-ui, Arial, sans-serif', fontStyle: 'italic', maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{msg.file_type}</Typography>
+                          </Box>
+                          <IconButton onClick={() => handleDownload(msg.file_url!, msg.file_name || '')}
+                            sx={{ color: '#00bcd4', ml: 1, '&:hover': { color: '#0097a7' }, fontSize: 28 }}>
+                            <AttachFileIcon fontSize="medium" />
+                          </IconButton>
+                        </Box>
+                      )
                     ) : (msg.type === 'audio' || (!msg.type && msg.audio_url)) && msg.audio_url ? (
                       <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                         <audio controls src={msg.audio_url} style={{ width: 180, marginRight: 8 }} />
@@ -505,34 +608,203 @@ export default function ChatWindow({ chatId, currentUserId, currentUserAvatarUrl
           </List>
         )}
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', px: 2, py: 1, bgcolor: '#19191e', borderRadius: 2 }}>
+        {/* Audio preview above input bar */}
+        {audioPreview ? (
+          <Box sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            bgcolor: '#000',
+            borderRadius: 4,
+            px: { xs: 1, sm: 2, md: 4 },
+            py: { xs: 1, sm: 1.5, md: 2.5 },
+            mb: 2,
+            boxShadow: '0 4px 24px #0008',
+            width: '100%',
+            maxWidth: '100vw',
+            minWidth: 0,
+            margin: '0 auto',
+            position: 'relative',
+            gap: { xs: 1, md: 2 },
+            flexWrap: 'wrap',
+            overflowX: 'auto',
+          }}>
+            {/* Custom Audio Player */}
+            {audioPreview && (
+              <CustomAudioPlayer
+                src={audioPreview}
+                duration={audioPreviewDuration}
+                setDuration={setAudioPreviewDuration}
+                sx={{ width: '100%', minWidth: 0, marginRight: 8 }}
+              />
+            )}
+
+            <Typography sx={{ color: '#fff', fontWeight: 700, fontFamily: 'monospace', fontSize: { xs: 16, md: 20 }, mx: { xs: 1, md: 2 }, minWidth: 60, textAlign: 'center', letterSpacing: 1 }}>
+              {audioPreviewDuration !== null
+                ? `${String(Math.floor(audioPreviewDuration / 60)).padStart(2, '0')}:${String(Math.round(audioPreviewDuration % 60)).padStart(2, '0')}`
+                : '--:--'}
+            </Typography>
+            <Button color="primary" variant="contained" size="medium" onClick={handleSendAudio} disabled={isUploadingAudio} sx={{ minWidth: 60, mx: { xs: 0.5, md: 1 } }}>Send</Button>
+            <Button variant="outlined" size="medium" onClick={handleCancelAudio} sx={{ minWidth: 60, color: '#fff', borderColor: '#fff', mx: { xs: 0.5, md: 1 }, '&:hover': { bgcolor: '#222', borderColor: '#fff', color: '#fff' } }}>Cancel</Button>
+          </Box>
+        ) : pendingFile ? (
+          <Box sx={{
+            position: 'fixed',
+            left: '50%',
+            bottom: { xs: 16, md: 36 },
+            transform: 'translateX(-50%)',
+            bgcolor: '#18191b',
+            borderRadius: 3,
+            boxShadow: '0 4px 32px #000a',
+            minWidth: 260,
+            maxWidth: '92vw',
+            width: 'fit-content',
+            zIndex: 9999,
+            display: 'flex',
+            flexDirection: { xs: 'column', sm: 'row' },
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 2,
+            px: { xs: 2, md: 3 },
+            py: 1.2,
+            overflow: 'hidden',
+          }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 72, height: 72, bgcolor: '#23262b', borderRadius: 2, mr: { xs: 0, sm: 2 }, mb: { xs: 1, sm: 0 }, overflow: 'hidden' }}>
+              {pendingFile && pendingFile.fileType.startsWith('image/') ? (
+                <img src={pendingFile.fileUrl} alt={pendingFile.fileName} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8, display: 'block' }} />
+              ) : (
+                <Box sx={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#25272b', borderRadius: 1 }}>
+                  <span style={{ color: '#00bcd4', fontSize: 28 }}>{pendingFile && (pendingFile.fileType.startsWith('video/') ? '🎬' : pendingFile.fileType.startsWith('audio/') ? '🎵' : '📄')}</span>
+                </Box>
+              )}
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 0, overflow: 'hidden', px: 1 }}>
+              <Typography sx={{ color: '#fff', fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200 }}>
+                {pendingFile && pendingFile.fileName}
+              </Typography>
+              <Typography sx={{ color: '#aaa', fontSize: 13, mt: 0.5 }}>
+                {pendingFile && (pendingFile.fileSize / 1024 / 1024).toFixed(2)} MB
+              </Typography>
+              {uploadProgress > 0 && uploadProgress < 100 && (
+                <Box sx={{ mt: 1 }}>
+                  <LinearProgress variant="determinate" value={uploadProgress} sx={{ height: 6, borderRadius: 2, bgcolor: '#23262b', '& .MuiLinearProgress-bar': { bgcolor: '#00bcd4' } }} />
+                  <Typography sx={{ color: '#00bcd4', fontSize: 12, mt: 0.5 }}>{uploadProgress.toFixed(0)}%</Typography>
+                </Box>
+              )}
+            </Box>
+            <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1, mt: { xs: 2, sm: 0 } }}>
+              <Button color="primary" variant="contained" size="medium" onClick={handleSendFile}>Send</Button>
+              <Button color="secondary" variant="outlined" size="medium" onClick={handleCancelFile} sx={{ color: '#fff' }}>Cancel</Button>
+            </Box>
+          </Box>
+        ) : null}
+        {/* Floating Recording Bar */}
+        {recording && (
+          <RecordingFloatingBar
+            recordingTime={recordingTime}
+            isPaused={isPaused}
+            onPause={handlePauseRecording}
+            onStop={() => {
+              if (mediaRecorder && recording) mediaRecorder.stop();
+            }}
+            audioStream={audioStream}
+          />
+        )}
+        <Box sx={{
+          display: 'flex',
+          alignItems: 'center',
+          width: '100%',
+          px: { xs: 2, md: 3 },
+          py: { xs: 0.5, md: 1 },
+          bgcolor: 'rgba(25,25,30,0.85)',
+          borderRadius: 24,
+          boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.18)',
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+        }}>
           <TextField
             fullWidth
-            variant="outlined"
-            placeholder="Type a message..."
+            inputRef={inputRef}
             value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewMessage(e.target.value)}
+            onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+              if (e.key === 'Enter' && !e.shiftKey && !sending && !recording && !pendingFile && !audioPreview) {
                 e.preventDefault();
                 handleSend();
               }
             }}
-            disabled={sending || recording}
-            sx={{ bgcolor: '#19191e', borderRadius: 2, flex: 1, mr: 1 }}
+            disabled={sending || recording || !!pendingFile || !!audioPreview}
+            sx={{
+              bgcolor: 'rgba(40,40,50,0.88)',
+              borderRadius: 999,
+              flex: 1,
+              mr: 1.5,
+              px: 1.2,
+              py: 0.7,
+              fontSize: 15,
+              color: '#fff',
+              border: 'none',
+              boxShadow: 'none',
+              width: '100%',
+              maxWidth: '100vw',
+              minWidth: 0,
+              '@media (max-width: 600px)': {
+                borderRadius: 0,
+                boxShadow: '0 -2px 24px #0004',
+                padding: 0,
+              },
+              '& .MuiOutlinedInput-root': {
+                borderRadius: 999,
+                background: 'transparent',
+                fontSize: 15,
+                color: '#fff',
+                boxShadow: 'none',
+                border: 'none',
+                paddingLeft: 2,
+                '& fieldset': {
+                  border: 'none',
+                },
+                '&:hover fieldset': {
+                  border: 'none',
+                },
+                '&.Mui-focused fieldset': {
+                  border: 'none',
+                },
+              },
+              '& input': {
+                color: '#fff',
+                fontFamily: 'Inter, Segoe UI, system-ui, Arial, sans-serif',
+                fontSize: 15,
+                padding: '7px 0',
+              },
+              '& .MuiInputBase-input': {
+                color: '#fff',
+                fontFamily: 'Inter, Segoe UI, system-ui, Arial, sans-serif',
+                fontSize: 18,
+              },
+            }}
             InputProps={{
               endAdornment: (
-                <IconButton component="label" sx={{ mr: 1 }}>
+                <IconButton component="label" sx={{ mr: 1, color: '#00bcd4', bgcolor: 'rgba(0,188,212,0.08)', borderRadius: 2, transition: 'background 0.15s', '&:hover': { bgcolor: 'rgba(0,188,212,0.18)' } }} disabled={!!audioPreview}>
                   <AttachFileIcon />
                   <input type="file" hidden onChange={handleFileChange} />
                 </IconButton>
               ),
             }}
           />
-          <IconButton onClick={recording ? handlePauseRecording : handleStartRecording} sx={{ ml: 1 }} color={recording ? 'error' : 'default'}>
-            {recording ? <StopIcon /> : <MicIcon />}
-          </IconButton>
-          <IconButton color="primary" onClick={handleSend} disabled={sending || !newMessage.trim() || recording} sx={{ bgcolor: '#1976d2', color: '#fff', '&:hover': { bgcolor: '#1565c0' }, width: 38, height: 38, ml: 0.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <IconButton onClick={recording ? handlePauseRecording : handleStartRecording} sx={{ ml: 1 }} color={recording ? 'error' : 'default'} disabled={!!pendingFile || !!audioPreview}>
+              {recording ? <StopIcon /> : <MicIcon />}
+            </IconButton>
+            {recording && (
+              <Typography sx={{ ml: 1, color: 'error.main', fontWeight: 600, fontFamily: 'monospace', minWidth: 48 }}>
+                {String(Math.floor(recordingTime / 60)).padStart(2, '0')}:{String(recordingTime % 60).padStart(2, '0')}
+              </Typography>
+            )}
+          </Box>
+          <IconButton color="primary" onClick={handleSend} disabled={sending || !newMessage.trim() || recording || !!pendingFile || !!audioPreview} sx={{ bgcolor: '#1976d2', color: '#fff', '&:hover': { bgcolor: '#1565c0' }, width: 38, height: 38, ml: 0.5 }}>
             <SendIcon sx={{ fontSize: 20 }} />
           </IconButton>
         </Box>
