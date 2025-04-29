@@ -71,7 +71,7 @@ export const FileMessageBubble: React.FC<FileMessageBubbleProps> = ({ fileUrl, f
                   a.click();
                   a.remove();
                   window.URL.revokeObjectURL(url);
-                } catch (err) {}
+                } catch (err) { /* Optionally handle error */ }
               }}
               sx={{ position: 'fixed', top: 24, right: 90, color: '#fff', bgcolor: '#2228', '&:hover': { bgcolor: '#000c' }, zIndex: 1400 }}
             >
@@ -145,7 +145,7 @@ export const FileMessageBubble: React.FC<FileMessageBubbleProps> = ({ fileUrl, f
                   a.click();
                   a.remove();
                   window.URL.revokeObjectURL(url);
-                } catch (err) {}
+                } catch (err) { /* Optionally handle error */ }
               }}
               sx={{ position: 'fixed', top: 24, right: 90, color: '#fff', bgcolor: '#2228', '&:hover': { bgcolor: '#000c' }, zIndex: 1400 }}
             >
