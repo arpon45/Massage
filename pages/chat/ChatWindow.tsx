@@ -12,7 +12,8 @@ import StopIcon from '@mui/icons-material/Stop';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { supabase } from '../../src/utils/supabaseClient';
 import { useRouter } from 'next/router';
-
+import MultiFilePreviewModal from './MultiFilePreviewModal';
+import FileUploadPreview from './FileUploadPreview';
 
 interface Message {
   id: string;
@@ -138,6 +139,7 @@ type PendingFile = {
   storagePath: string;
 };
 const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+const [multiPreviewOpen, setMultiPreviewOpen] = useState(false);
 
 const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
   setUploadProgress(0);
@@ -184,7 +186,34 @@ const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
 
   // Always set as array, even if only one file
   setPendingFiles(localPendingFiles);
+if (localPendingFiles.length > 1 && localPendingFiles.every(f => f.fileType.startsWith('image/') || f.fileType.startsWith('video/'))) {
+  setMultiPreviewOpen(true);
+}
   e.target.value = '';
+};
+
+const handleRemovePendingFile = (index: number) => {
+  setPendingFiles(files => files.filter((_, i) => i !== index));
+  // If last file removed, close modal
+  if (pendingFiles.length <= 1) setMultiPreviewOpen(false);
+};
+
+const handleSendAllFiles = async () => {
+  if (!pendingFiles.length) return;
+  for (const file of pendingFiles) {
+    await supabase.from('messages').insert({
+      chat_id: chatId,
+      sender_id: currentUserId,
+      content: '',
+      file_url: file.fileUrl,
+      file_name: file.fileName,
+      file_type: file.fileType,
+      file_size: file.fileSize,
+      type: 'file',
+    });
+  }
+  setPendingFiles([]);
+  setMultiPreviewOpen(false);
 };
 
 const handleSendFile = async () => {
@@ -683,77 +712,27 @@ const handleCancelFile = async () => {
               </Button>
             </Box>
           </Box>
-        ) : pendingFiles.length ? (
-          <Box sx={{
-            position: 'fixed',
-            left: '50%',
-            bottom: { xs: 16, md: 36 },
-            transform: 'translateX(-50%)',
-            bgcolor: '#18191b',
-            borderRadius: 3,
-            boxShadow: '0 4px 32px #000a',
-            minWidth: 260,
-            maxWidth: '92vw',
-            width: 'fit-content',
-            zIndex: 9999,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 2,
-            px: { xs: 2, md: 3 },
-            py: 1.2,
-            overflow: 'hidden',
-          }}>
-            {pendingFiles.map((pendingFile, idx) => (
-              <Box key={pendingFile.fileUrl + idx} sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 1 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 72, height: 72, bgcolor: '#23262b', borderRadius: 2, mr: 2, overflow: 'hidden' }}>
-                  {pendingFile.fileType.startsWith('image/') ? (
-                    <img src={pendingFile.fileUrl} alt={pendingFile.fileName} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8, display: 'block' }} />
-                  ) : (
-                    <Box sx={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#25272b', borderRadius: 1 }}>
-                      <span style={{ color: '#00bcd4', fontSize: 28 }}>{pendingFile.fileType.startsWith('video/') ? '🎬' : pendingFile.fileType.startsWith('audio/') ? '🎵' : '📄'}</span>
-                    </Box>
-                  )}
-                </Box>
-                <Box sx={{ flex: 1, minWidth: 0, overflow: 'hidden', px: 1 }}>
-                  <Typography sx={{ color: '#fff', fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200 }}>
-                    {pendingFile.fileName}
-                  </Typography>
-                  <Typography sx={{ color: '#aaa', fontSize: 13, mt: 0.5 }}>
-                    {(pendingFile.fileSize / 1024 / 1024).toFixed(2)} MB
-                  </Typography>
-                  {uploadProgress > 0 && uploadProgress < 100 && idx === (pendingFiles.length - 1) && (
-                    <Box sx={{ mt: 1 }}>
-                      <LinearProgress variant="determinate" value={uploadProgress} sx={{ height: 6, borderRadius: 2, bgcolor: '#23262b', '& .MuiLinearProgress-bar': { bgcolor: '#00bcd4' } }} />
-                      <Typography sx={{ color: '#00bcd4', fontSize: 12, mt: 0.5 }}>{uploadProgress.toFixed(0)}%</Typography>
-                    </Box>
-                  )}
-                </Box>
-                <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
-                  <Button color="primary" variant="contained" size="medium" onClick={async () => {
-                    // Send this file only
-                    await supabase.from('messages').insert({
-                      chat_id: chatId,
-                      sender_id: currentUserId,
-                      content: '',
-                      file_url: pendingFile.fileUrl,
-                      file_name: pendingFile.fileName,
-                      file_type: pendingFile.fileType,
-                      file_size: pendingFile.fileSize,
-                      type: 'file'
-                    });
-                    setPendingFiles(files => files.filter((_, i) => i !== idx));
-                  }}>Send</Button>
-                  <Button color="secondary" variant="outlined" size="medium" onClick={async () => {
-                    // Cancel this file only
-                    await supabase.storage.from('chat-files').remove([pendingFile.storagePath]);
-                    setPendingFiles(files => files.filter((_, i) => i !== idx));
-                  }} sx={{ color: '#fff' }}>Cancel</Button>
-                </Box>
-              </Box>
-            ))}
-          </Box>
+        ) : multiPreviewOpen && pendingFiles.length > 1 ? (
+          <MultiFilePreviewModal
+            files={pendingFiles}
+            open={multiPreviewOpen}
+            onClose={() => setMultiPreviewOpen(false)}
+            onRemove={handleRemovePendingFile}
+            onSendAll={handleSendAllFiles}
+          />
+        ) : pendingFiles.length === 1 ? (
+          <FileUploadPreview
+            fileName={pendingFiles[0].fileName}
+            fileSize={pendingFiles[0].fileSize}
+            fileType={pendingFiles[0].fileType}
+            fileUrl={pendingFiles[0].fileUrl}
+            uploadProgress={uploadProgress}
+            onSend={handleSendFile}
+            onCancel={() => setPendingFiles([])}
+            onClose={() => setPendingFiles([])}
+            uploading={uploadProgress > 0 && uploadProgress < 100}
+            visible={pendingFiles.length > 0}
+          />
         ) : null}
         {/* Floating Recording Bar */}
         {recording && (
@@ -790,13 +769,20 @@ const handleCancelFile = async () => {
             inputRef={inputRef}
             value={newMessage}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewMessage(e.target.value)}
-            onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
-              if (e.key === 'Enter' && !e.shiftKey && !sending && !recording && !pendingFiles && !audioPreview) {
-                e.preventDefault();
-                handleSend();
+            onKeyDown={(e) => {
+              const event = e as React.KeyboardEvent<HTMLDivElement>;
+              if (event.key === 'Enter') {
+                if (event.shiftKey) {
+                  // Allow newline
+                  return;
+                }
+                if (!sending && !recording && pendingFiles.length === 0 && !audioPreview) {
+                  event.preventDefault();
+                  handleSend();
+                }
               }
             }}
-            disabled={sending || recording || !!pendingFiles || !!audioPreview}
+            disabled={sending || recording || ((multiPreviewOpen && pendingFiles.length > 1) || (pendingFiles.length === 1)) || !!audioPreview}
             placeholder="Type a message..."
             sx={{
               bgcolor: 'rgba(40,40,50,0.88)',
@@ -852,7 +838,7 @@ const handleCancelFile = async () => {
           />
           {!audioPreview && (
             <Box sx={{ display: 'flex', alignItems: 'center' }}>
-              <IconButton onClick={recording ? handlePauseRecording : handleStartRecording} sx={{ ml: 1 }} color={recording ? 'error' : 'default'} disabled={!!pendingFiles || !!audioPreview}>
+              <IconButton onClick={recording ? handlePauseRecording : handleStartRecording} sx={{ ml: 1 }} color={recording ? 'error' : 'default'} disabled={((multiPreviewOpen && pendingFiles.length > 1) || (pendingFiles.length === 1)) || !!audioPreview}>
                 {recording ? <StopIcon /> : <MicIcon />}
               </IconButton>
               {recording && (
@@ -860,7 +846,7 @@ const handleCancelFile = async () => {
                   {String(Math.floor(recordingTime / 60)).padStart(2, '0')}:{String(recordingTime % 60).padStart(2, '0')}
                 </Typography>
               )}
-              <IconButton color="primary" onClick={handleSend} disabled={sending || !newMessage.trim() || recording || !!pendingFiles || !!audioPreview} sx={{ bgcolor: '#1976d2', color: '#fff', '&:hover': { bgcolor: '#1565c0' }, width: 38, height: 38, ml: 0.5 }}>
+              <IconButton color="primary" onClick={handleSend} disabled={sending || !newMessage.trim() || recording || pendingFiles.length > 0 || !!audioPreview} sx={{ bgcolor: '#1976d2', color: '#fff', '&:hover': { bgcolor: '#1565c0' }, width: 38, height: 38, ml: 0.5 }}>
                 <SendIcon sx={{ fontSize: 20 }} />
               </IconButton>
             </Box>
