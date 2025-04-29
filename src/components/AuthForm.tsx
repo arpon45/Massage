@@ -42,7 +42,13 @@ export default function AuthForm({ onAuth }: { onAuth: () => void }) {
         onAuth();
       }
     } else {
-      resp = await supabase.auth.signUp({ email, password });
+      resp = await supabase.auth.signUp({
+  email,
+  password,
+  options: {
+    emailRedirectTo: "https://massage-pi.vercel.app/"
+  }
+});
       if (resp.error) {
         setError(resp.error.message);
       } else {
