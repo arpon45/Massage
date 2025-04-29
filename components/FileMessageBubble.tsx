@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Typography, Modal, IconButton } from '@mui/material';
+import { Box, Typography, Modal, IconButton, Snackbar, Alert } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import DownloadIcon from '@mui/icons-material/Download';
 
@@ -12,6 +12,8 @@ interface FileMessageBubbleProps {
 }
 
 export const FileMessageBubble: React.FC<FileMessageBubbleProps> = ({ fileUrl, fileName, fileType, fileSize, isMine }) => {
+  const [snackOpen, setSnackOpen] = useState(false);
+  const [snackMsg, setSnackMsg] = useState('');
   const isImage = fileType.startsWith('image/');
   const isVideo = fileType.startsWith('video/');
   const [open, setOpen] = useState(false);
@@ -62,6 +64,7 @@ export const FileMessageBubble: React.FC<FileMessageBubbleProps> = ({ fileUrl, f
               onClick={async () => {
                 try {
                   const response = await fetch(fileUrl, { mode: 'cors' });
+                  if (!response.ok) throw new Error('Download failed');
                   const blob = await response.blob();
                   const url = window.URL.createObjectURL(blob);
                   const a = document.createElement('a');
@@ -71,7 +74,10 @@ export const FileMessageBubble: React.FC<FileMessageBubbleProps> = ({ fileUrl, f
                   a.click();
                   a.remove();
                   window.URL.revokeObjectURL(url);
-                } catch (err) { /* Optionally handle error */ }
+                } catch (err) {
+                  setSnackMsg('Download failed. Please check permissions or try again.');
+                  setSnackOpen(true);
+                }
               }}
               sx={{ position: 'fixed', top: 24, right: 90, color: '#fff', bgcolor: '#2228', '&:hover': { bgcolor: '#000c' }, zIndex: 1400 }}
             >
@@ -79,6 +85,9 @@ export const FileMessageBubble: React.FC<FileMessageBubbleProps> = ({ fileUrl, f
             </IconButton>
           </Box>
         </Modal>
+      <Snackbar open={snackOpen} autoHideDuration={4000} onClose={() => setSnackOpen(false)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert severity="error" variant="filled" onClose={() => setSnackOpen(false)}>{snackMsg}</Alert>
+      </Snackbar>
       </>
     );
   }
@@ -136,6 +145,7 @@ export const FileMessageBubble: React.FC<FileMessageBubbleProps> = ({ fileUrl, f
               onClick={async () => {
                 try {
                   const response = await fetch(fileUrl, { mode: 'cors' });
+                  if (!response.ok) throw new Error('Download failed');
                   const blob = await response.blob();
                   const url = window.URL.createObjectURL(blob);
                   const a = document.createElement('a');
@@ -145,7 +155,10 @@ export const FileMessageBubble: React.FC<FileMessageBubbleProps> = ({ fileUrl, f
                   a.click();
                   a.remove();
                   window.URL.revokeObjectURL(url);
-                } catch (err) { /* Optionally handle error */ }
+                } catch (err) {
+                  setSnackMsg('Download failed. Please check permissions or try again.');
+                  setSnackOpen(true);
+                }
               }}
               sx={{ position: 'fixed', top: 24, right: 90, color: '#fff', bgcolor: '#2228', '&:hover': { bgcolor: '#000c' }, zIndex: 1400 }}
             >
@@ -153,6 +166,9 @@ export const FileMessageBubble: React.FC<FileMessageBubbleProps> = ({ fileUrl, f
             </IconButton>
           </Box>
         </Modal>
+      <Snackbar open={snackOpen} autoHideDuration={4000} onClose={() => setSnackOpen(false)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert severity="error" variant="filled" onClose={() => setSnackOpen(false)}>{snackMsg}</Alert>
+      </Snackbar>
       </>
     );
   }

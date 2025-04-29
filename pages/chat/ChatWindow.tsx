@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
-import { Box, Typography, Avatar, TextField, IconButton, List, ListItem, ListItemAvatar, ListItemText, Paper, CircularProgress, Dialog, Button, Menu, MenuItem, Input, LinearProgress } from '@mui/material';
+import { Box, Typography, Avatar, TextField, IconButton, List, ListItem, ListItemAvatar, ListItemText, Paper, CircularProgress, Dialog, Button, Menu, MenuItem, Input, LinearProgress, Snackbar, Alert } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import PersonIcon from '@mui/icons-material/Person';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
@@ -47,6 +47,83 @@ function getInitials(name?: string) {
 
 
 export default function ChatWindow({ chatId, currentUserId, currentUserAvatarUrl, currentUserDisplayName, otherUser, deleteChat }: ChatWindowProps) {
+  const [snackOpen, setSnackOpen] = useState(false);
+  const [snackMsg, setSnackMsg] = useState('');
+  const [messages, setMessages] = useState<Message[]>([]);
+
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default');
+  const lastMessageRef = useRef<Message | null>(null);
+
+  // Helper: request notification permission
+  const requestNotificationPermission = async () => {
+    console.log('[Notification] Requesting permission. Current:', Notification.permission);
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      const perm = await Notification.requestPermission();
+      setNotificationPermission(perm);
+    } else {
+      setNotificationPermission(Notification.permission);
+    }
+  };
+
+  // Helper: show notification
+  const showBrowserNotification = (msg: Message) => {
+    console.log('[Notification] showBrowserNotification called. msg:', msg, 'permission:', Notification.permission);
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      console.log('[Notification] Notification API not supported.');
+      return;
+    }
+    if (Notification.permission !== 'granted') {
+      console.log('[Notification] Permission not granted.');
+      return;
+    }
+    const sender = otherUser?.display_name || 'New message';
+    const options: NotificationOptions = {
+      body: msg.content ? msg.content : (msg.type === 'audio' ? 'Voice message' : msg.file_name || 'New file'),
+      icon: otherUser?.avatar_url || '/favicon.ico',
+      tag: `chat-${chatId}`,
+    };
+    console.log('[Notification] Showing notification for message:', msg, 'visibilityState:', document.visibilityState, 'sender:', sender);
+    const n = new Notification(sender, options);
+    n.onclick = () => {
+      window.focus();
+      n.close();
+    };
+  };
+
+  // Listen for new incoming messages and show notification if needed
+  useEffect(() => {
+    console.log('[Notification] useEffect for new messages. notificationPermission:', notificationPermission);
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (notificationPermission === 'default') {
+      // Optionally, auto-request permission on mount or show a button in UI
+      // requestNotificationPermission();
+    }
+  }, []);
+
+  // Assume you have a messages state and setMessages in this component
+  // Add this effect after messages are updated
+  useEffect(() => {
+    console.log('[Notification] useEffect for new messages. messages:', messages);
+    if (!messages || messages.length === 0) return;
+    const lastMsg = messages[messages.length - 1];
+    // Only notify if the message is not from this user and is new
+    if (
+      lastMsg.sender_id !== currentUserId &&
+      lastMessageRef.current?.id !== lastMsg.id &&
+      document.visibilityState !== 'visible'
+    ) {
+      console.log('[Notification] Showing notification for message:', lastMsg, 'visibilityState:', document.visibilityState, 'sender:', lastMsg.sender_id);
+      if (notificationPermission === 'granted') {
+        showBrowserNotification(lastMsg);
+      } else if (notificationPermission === 'default') {
+        requestNotificationPermission();
+      }
+    }
+    lastMessageRef.current = lastMsg;
+  }, [messages, notificationPermission, currentUserId]);
+
+
   // Image/file preview modal state
   const [imagePreview, setImagePreview] = useState<{ url: string; name: string } | null>(null);
   // Download handler for any file (image or other)
@@ -95,6 +172,7 @@ export default function ChatWindow({ chatId, currentUserId, currentUserAvatarUrl
     }
   };
 
+
   // Delete chat handler
   const handleDeleteChat = async () => {
     setMenuAnchorEl(null);
@@ -102,7 +180,6 @@ export default function ChatWindow({ chatId, currentUserId, currentUserAvatarUrl
   };
 
   const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   // Filter messages for search
@@ -242,41 +319,50 @@ const handleCancelFile = async () => {
 };
 
   const handleStartRecording = async () => {
-    if (!navigator.mediaDevices) return alert("Audio recording not supported!");
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new MediaRecorder(stream);
-    setMediaRecorder(recorder);
-    setAudioStream(stream);
-    audioChunksRef.current = [];
-    setRecordingTime(0);
-    setIsPaused(false);
-    recorder.start();
-    setRecording(true);
-    // Start timer
-    const interval = setInterval(() => {
-      setRecordingTime((prev) => prev + 1);
-    }, 1000);
-    setRecordingInterval(interval);
-
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        audioChunksRef.current.push(e.data);
-      }
-    };
-
-    recorder.onstop = () => {
-      setRecording(false);
-      if (recordingInterval) clearInterval(recordingInterval);
-      setRecordingInterval(null);
+    if (!navigator.mediaDevices) {
+      setSnackMsg('Audio recording not supported on this device.');
+      setSnackOpen(true);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      setMediaRecorder(recorder);
+      setAudioStream(stream);
+      audioChunksRef.current = [];
+      setRecordingTime(0);
       setIsPaused(false);
-      if (audioStream) {
-        audioStream.getTracks().forEach(track => track.stop());
-        setAudioStream(null);
-      }
-      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-      const url = URL.createObjectURL(audioBlob);
-      setAudioPreview(url);
-    };
+      recorder.start();
+      setRecording(true);
+      // Start timer
+      const interval = setInterval(() => {
+        setRecordingTime((prev) => prev + 1);
+      }, 1000);
+      setRecordingInterval(interval);
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        setRecording(false);
+        if (recordingInterval) clearInterval(recordingInterval);
+        setRecordingInterval(null);
+        setIsPaused(false);
+        if (audioStream) {
+          audioStream.getTracks().forEach(track => track.stop());
+          setAudioStream(null);
+        }
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const url = URL.createObjectURL(audioBlob);
+        setAudioPreview(url);
+      };
+    } catch (err) {
+      setSnackMsg('Microphone permission denied. Please allow access to record voice messages.');
+      setSnackOpen(true);
+    }
   };
 
   const handlePauseRecording = () => {
