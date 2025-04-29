@@ -2,8 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Box, Button, TextField, Typography, Avatar, Paper, CircularProgress, InputAdornment, IconButton } from '@mui/material';
 import { PhotoCamera } from '@mui/icons-material';
 import { supabase } from '../src/utils/supabaseClient';
+import { useTheme } from '@mui/material/styles';
 
 export default function ProfileSetup() {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
   const [avatar, setAvatar] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [username, setUsername] = useState('');
@@ -121,17 +124,17 @@ export default function ProfileSetup() {
         maxWidth: 410,
         borderRadius: 6,
         boxShadow: '0 8px 32px #1976d240, 0 1.5px 6px #00c6ff33',
-        background: 'rgba(255,255,255,0.94)',
+        background: isDark ? 'rgba(24,28,35,0.96)' : 'rgba(255,255,255,0.94)',
         backdropFilter: 'blur(10px)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         position: 'relative',
         overflow: 'hidden',
-        border: '1.5px solid #e3e8f3',
+        border: isDark ? '1.5px solid #23272f' : '1.5px solid #e3e8f3',
         mt: -6
       }}>
-        <Typography variant="h5" fontWeight={800} color="#1976d2" sx={{ mb: 2, letterSpacing: 1, textAlign: 'center' }}>
+        <Typography variant="h5" fontWeight={800} sx={{ mb: 2, letterSpacing: 1, textAlign: 'center', color: isDark ? '#fff' : '#1976d2' }}>
           Complete Your Profile
         </Typography>
         <Box sx={{ mb: 4, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -168,19 +171,24 @@ export default function ProfileSetup() {
             onChange={e => setUsername(e.target.value)} 
             fullWidth 
             required
-            sx={{ mb: 1 }}
-            helperText={usernameError ? usernameError : (usernameAvailable === true ? 'Username is available!' : 'Unique, used for search and messaging')}
-            error={!!usernameError}
-            InputProps={{
-              endAdornment: checkingUsername ? <CircularProgress size={18} /> : usernameAvailable === true ? <span style={{color:'#388e3c',fontWeight:600}}>✔</span> : usernameAvailable === false ? <span style={{color:'#d32f2f',fontWeight:600}}>✖</span> : null
-            }}
-          />
-          <TextField label="Display Name" value={displayName} onChange={e => setDisplayName(e.target.value)} fullWidth required sx={{ mb: 2 }} />
-          <TextField label="Bio" value={bio} onChange={e => setBio(e.target.value)} fullWidth multiline rows={2} sx={{ mb: 2 }} />
-          {error && <Typography color="error" sx={{ mb: 1 }}>{error}</Typography>}
-          <Button type="submit" variant="contained" color="primary" fullWidth disabled={loading} sx={{ mt: 1, fontWeight: 700, fontSize: 17, borderRadius: 3 }}>
-            {loading ? <CircularProgress size={22} color="inherit" /> : 'Finish Setup'}
-          </Button>
+            sx={{ mb: 1, 
+                  '& .MuiInputBase-input': { color: isDark ? '#fff' : '#181c23' },
+                  '& .MuiInputLabel-root': { color: isDark ? '#aaa' : '#1976d2' },
+                  '& .MuiFormHelperText-root': { color: isDark ? '#aaa' : '#1976d2' },
+             }}
+             helperText={usernameError ? usernameError : (usernameAvailable === true ? 'Username is available!' : 'Unique, used for search and messaging')}
+             error={!!usernameError}
+             InputProps={{
+               endAdornment: checkingUsername ? <CircularProgress size={18} /> : usernameAvailable === true ? <span style={{color:'#388e3c',fontWeight:600}}>✔</span> : usernameAvailable === false ? <span style={{color:'#d32f2f',fontWeight:600}}>✖</span> : null,
+               style: { color: isDark ? '#fff' : '#181c23' }
+             }}
+           />
+           <TextField label="Display Name" value={displayName} onChange={e => setDisplayName(e.target.value)} fullWidth required sx={{ mb: 2, '& .MuiInputBase-input': { color: isDark ? '#fff' : '#181c23' }, '& .MuiInputLabel-root': { color: isDark ? '#aaa' : '#1976d2' } }} />
+           <TextField label="Bio" value={bio} onChange={e => setBio(e.target.value)} fullWidth multiline rows={2} sx={{ mb: 2, '& .MuiInputBase-input': { color: isDark ? '#fff' : '#181c23' }, '& .MuiInputLabel-root': { color: isDark ? '#aaa' : '#1976d2' } }} />
+           {error && <Typography color="error" sx={{ mb: 1 }}>{error}</Typography>}
+           <Button type="submit" variant="contained" color="primary" fullWidth disabled={loading} sx={{ mt: 1, fontWeight: 700, fontSize: 17, borderRadius: 3, color: isDark ? '#fff' : '#181c23', bgcolor: isDark ? '#1976d2' : '#00e1ff', '&:hover': { bgcolor: isDark ? '#1565c0' : '#00bcd4' } }}>
+             {loading ? <CircularProgress size={22} color="inherit" /> : 'Finish Setup'}
+           </Button>
         </form>
       </Paper>
     </Box>

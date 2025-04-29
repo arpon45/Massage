@@ -27,7 +27,15 @@ export default function PinLockGate({ children }: { children: React.ReactNode })
         .single();
       if (!error && data && data.pin_hash) {
         setPinHash(data.pin_hash);
-        setShowPinLock(true);
+        // Check if user just set their PIN (first time)
+        if (localStorage.getItem('justSetPin') === 'true') {
+          // Don't show PinLockModal this time, clear the flag
+          localStorage.removeItem('justSetPin');
+          setUnlocked(true);
+          setShowPinLock(false);
+        } else {
+          setShowPinLock(true);
+        }
       } else {
         setShowSetPin(true);
       }
@@ -41,7 +49,11 @@ export default function PinLockGate({ children }: { children: React.ReactNode })
 
   return (
     <>
-      <SetPinModal open={showSetPin} onSet={() => { setShowSetPin(false); setShowPinLock(true); }} userId={userId} />
+      <SetPinModal open={showSetPin} onSet={() => {
+        setShowSetPin(false);
+        setUnlocked(true); // Unlock for this session, do not show PinLockModal
+        localStorage.setItem('justSetPin', 'true'); // Mark that user just set PIN
+      }} userId={userId} />
       <PinLockModal open={showPinLock && !unlocked} onUnlock={() => { setUnlocked(true); setShowPinLock(false); }} userId={userId} />
       {unlocked || (!pinHash && !showSetPin) ? children : null}
     </>

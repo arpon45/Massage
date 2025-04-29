@@ -44,23 +44,32 @@ export default function NewChatModal({ open, onClose, onRequestSent, currentUser
 
   const handleSendRequest = async (user: UserProfile) => {
     setSendingId(user.id);
-    // Check if a chat already exists between these two users
-    const { data: existing, error: existingErr } = await supabase
+    // Check if a chat with both users as active members exists
+    const { data: sharedChats } = await supabase
       .from('chat_members')
-      .select('chat_id')
-      .or(`user_id.eq.${currentUserId},user_id.eq.${user.id}`)
-      .in('chat_id',
-        (
-          await supabase
-            .from('chat_members')
-            .select('chat_id')
-            .eq('user_id', currentUserId)
-        ).data?.map((cm: any) => cm.chat_id) || []
-      );
-    if (existing && existing.length >= 2) {
-      alert('A chat with this user already exists or is pending.');
-      setSendingId(null);
-      return;
+      .select('chat_id, user_id')
+      .in('user_id', [currentUserId, user.id]);
+
+    // Find chat_ids with both users as members
+    const chatIdCounts = (sharedChats || []).reduce((acc: Record<string, number>, cm: any) => {
+      acc[cm.chat_id] = (acc[cm.chat_id] || 0) + 1;
+      return acc;
+    }, {});
+    const commonChatIds = Object.keys(chatIdCounts).filter(cid => chatIdCounts[cid] === 2);
+
+    let activeChatExists = false;
+    if (commonChatIds.length > 0) {
+      // Check if current user is still a member (not deleted) in any common chat
+      const { data: myMemberships } = await supabase
+        .from('chat_members')
+        .select('chat_id')
+        .eq('user_id', currentUserId)
+        .in('chat_id', commonChatIds);
+      if (myMemberships && myMemberships.length > 0) {
+        alert('A chat with this user already exists or is pending.');
+        setSendingId(null);
+        return;
+      }
     }
     // 1. Create chat
     const { data: chat, error: chatErr } = await supabase
@@ -72,10 +81,10 @@ export default function NewChatModal({ open, onClose, onRequestSent, currentUser
       setSendingId(null);
       return;
     }
-    // 2. Add both users to chat_members (sender: accepted, receiver: pending)
+    // 2. Add both users to chat_members (sender: accepted, receiver: accepted)
     await supabase.from('chat_members').insert([
       { chat_id: chat.id, user_id: currentUserId, status: 'accepted' },
-      { chat_id: chat.id, user_id: user.id, status: 'pending' },
+      { chat_id: chat.id, user_id: user.id, status: 'accepted' },
     ]);
     setSendingId(null);
     onRequestSent(user);
@@ -116,8 +125,8 @@ export default function NewChatModal({ open, onClose, onRequestSent, currentUser
                   <ListItem secondaryAction={
                     <Button
                       variant="contained"
-                      size="medium"
-                      sx={{ borderRadius: 2, minWidth: 120, fontWeight: 700 }}
+                      size="small"
+                      sx={{ borderRadius: 2, minWidth: 80, fontWeight: 700, mt: 4 }}
                       disabled={sendingId === user.id}
                       onClick={() => handleSendRequest(user)}
                     >

@@ -47,36 +47,58 @@ export default function ChatDashboard() {
   // Real chat data
   const [selectedChat, setSelectedChat] = React.useState<string | undefined>(undefined);
   const [chats, setChats] = React.useState<any[]>([]);
+  const [refreshKey, setRefreshKey] = React.useState(0);
 
   React.useEffect(() => {
     if (!currentUserId) return;
     // Fetch all chats where current user is a member, and join the other user's profile
-    supabase
-      .from('chat_members')
-      .select(`chat_id, status, user_id, chats(id, is_group, chat_members(user_id, status, profiles(username, display_name, avatar_url)), messages(id, content, created_at, sender_id))`)
-      .eq('user_id', currentUserId)
-      .order('created_at', { ascending: false })
-      .then(({ data, error }) => {
-        console.log('Fetched chat_members:', data, error);
-        if (data) {
-          const mapped = data.map((cm: any) => {
-            // Find the other user for 1:1 chat
-            const members = cm.chats?.chat_members?.filter((m: any) => m.user_id !== currentUserId);
-            const other = members && members.length > 0 ? members[0].profiles : null;
-            const lastMessage = cm.chats?.messages?.length ? cm.chats.messages[cm.chats.messages.length - 1].content : '';
-            return {
-              id: cm.chat_id,
-              name: other ? other.display_name : 'Unknown',
-              avatarUrl: other ? other.avatar_url : '',
-              lastMessage,
-              status: cm.status,
-              isRequestReceiver: cm.status === 'pending',
-            };
-          });
-          setChats(mapped);
-        }
-      });
-  }, [currentUserId, snackOpen]);
+    const fetchChats = () => {
+      supabase
+        .from('chat_members')
+        .select(`chat_id, status, user_id, chats(id, is_group, chat_members(user_id, status, profiles(username, display_name, avatar_url)), messages(id, content, created_at, sender_id))`)
+        .eq('user_id', currentUserId)
+        .order('created_at', { ascending: false })
+        .then(({ data, error }) => {
+          if (data) {
+            const mapped = data.map((cm: any) => {
+              // Find the other user for 1:1 chat
+              const members = cm.chats?.chat_members?.filter((m: any) => m.user_id !== currentUserId);
+              const other = members && members.length > 0 ? members[0].profiles : null;
+              const lastMessage = cm.chats?.messages?.length ? cm.chats.messages[cm.chats.messages.length - 1].content : '';
+              return {
+                id: cm.chat_id,
+                name: other ? other.display_name : 'Unknown',
+                avatarUrl: other ? other.avatar_url : '',
+                lastMessage,
+                status: cm.status,
+                isRequestReceiver: cm.status === 'pending',
+                isOtherProfileMissing: !other,
+              };
+            }).filter((chat: any) => !chat.isOtherProfileMissing);
+            setChats(mapped);
+          }
+        });
+    };
+    fetchChats();
+    // Subscribe to new messages for live update
+    const messageSub = supabase
+      .channel('messages-listen')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
+        fetchChats();
+      })
+      .subscribe();
+    // Subscribe to chat_members for new chat requests (incoming/outgoing)
+    const chatMembersSub = supabase
+      .channel('chat-members-listen')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_members' }, payload => {
+        fetchChats();
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(messageSub);
+      supabase.removeChannel(chatMembersSub);
+    };
+  }, [currentUserId, snackOpen, refreshKey]);
 
   // Accept/reject handlers
   const handleAcceptRequest = async (chatId: string) => {
@@ -220,7 +242,7 @@ export default function ChatDashboard() {
         <Fab
           color="primary"
           aria-label="new-chat"
-          sx={{ position: 'fixed', bottom: 32, right: 32, zIndex: 1200 }}
+          sx={{ position: 'fixed', bottom: 80, right: 32, zIndex: 1200 }}
           onClick={() => setNewChatOpen(true)}
         >
           <AddIcon />
@@ -229,7 +251,7 @@ export default function ChatDashboard() {
       <NewChatModal
         open={newChatOpen}
         onClose={() => setNewChatOpen(false)}
-        onRequestSent={() => setSnackOpen(true)}
+        onRequestSent={() => { setSnackOpen(true); setRefreshKey(k => k + 1); }}
         currentUserId={currentUserId || ''}
       />
       <Snackbar

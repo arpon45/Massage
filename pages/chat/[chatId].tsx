@@ -49,9 +49,11 @@ export default function ChatPage() {
   }, [chatId, currentUserId]);
 
   const handleDeleteChat = async () => {
-    await supabase.from('chat_members').delete().eq('chat_id', chatId);
-    await supabase.from('messages').delete().eq('chat_id', chatId);
-    await supabase.from('chats').delete().eq('id', chatId);
+    if (!currentUserId) return;
+    // Remove user from chat_members
+    // Only remove the current user's membership and their messages, not the chat or other user's membership
+    await supabase.from('chat_members').delete().eq('chat_id', chatId).eq('user_id', currentUserId);
+    await supabase.from('messages').delete().eq('chat_id', chatId).eq('sender_id', currentUserId);
     router.replace('/chat');
   };
 
